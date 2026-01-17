@@ -5,13 +5,12 @@ Description: Mostra i prossimi treni in partenza da una stazione Trenitalia. Per
 Author: Mattia Colombo
 """
 
+load("cache.star", "cache")
+load("encoding/json.star", "json")
+load("http.star", "http")
 load("render.star", "render")
 load("schema.star", "schema")
-load("http.star", "http")
 load("time.star", "time")
-load("encoding/json.star", "json")
-load("cache.star", "cache")
-load("humanize.star", "humanize")
 
 # API Base URL
 VIAGGIATRENO_BASE = "http://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno"
@@ -59,6 +58,7 @@ DEFAULT_STATIONS = [
 
 def main(config):
     """Funzione principale dell'app."""
+
     # Gestisci station_id che può essere stringa o oggetto JSON da pixlet serve
     station_id_raw = config.get("station_id", "S01700")
     if type(station_id_raw) == "dict":
@@ -70,7 +70,7 @@ def main(config):
             # Estrai il codice stazione dalla stringa
             import_idx = station_id_raw.find("S0")
             if import_idx >= 0:
-                station_id = station_id_raw[import_idx:import_idx+6]
+                station_id = station_id_raw[import_idx:import_idx + 6]
     else:
         station_id = station_id_raw
 
@@ -97,6 +97,7 @@ def main(config):
     for d in departures:
         orario_ms = d.get("orarioPartenza", 0)
         ritardo = d.get("ritardo", 0) or 0
+
         # Orario effettivo = orario previsto + ritardo + margine
         orario_effettivo_ms = orario_ms + (ritardo * 60 * 1000) + margin_ms
         if orario_effettivo_ms > now_ts:
@@ -118,7 +119,8 @@ def main(config):
     # Filtra per numero treno se specificato
     if train_number_filter:
         departures = [
-            d for d in departures
+            d
+            for d in departures
             if str(d.get("numeroTreno", "")) == train_number_filter
         ]
 
@@ -137,15 +139,17 @@ def main(config):
 
     # Costruisci la UI
     train_rows = []
-    for i, train in enumerate(trains_to_show):
+    for train in trains_to_show:
         train_rows.append(render_train_row(train))
 
     # Se più di 3 treni, crea animazione che mostra gruppi di 3
     if num_trains > 3:
         pages = []
+
         # Crea frame per ogni "pagina" di 3 treni
         for start in range(0, len(train_rows), 3):
             page_rows = train_rows[start:start + 3]
+
             # Aggiungi righe vuote se necessario per riempire
             for _ in range(3 - len(page_rows)):
                 page_rows.append(render.Box(width = 64, height = 8))
@@ -287,9 +291,10 @@ def render_train_row(train):
     )
 
 def get_departures(station_id):
-    """Ottiene le partenze da una stazione per tutta la giornata."""
+    """Ottiene le partenze da una stazione."""
+
     # Controlla cache
-    cache_key = "departures_full_%s" % station_id
+    cache_key = "departures_%s" % station_id
     cached = cache.get(cache_key)
     if cached:
         return json.decode(cached)
@@ -308,54 +313,33 @@ def get_departures(station_id):
     month_idx = {"January": 0, "February": 1, "March": 2, "April": 3, "May": 4, "June": 5, "July": 6, "August": 7, "September": 8, "October": 9, "November": 10, "December": 11}.get(month_str, 0)
     month_name = months[month_idx]
 
-    all_departures = []
-    seen_trains = {}  # Per evitare duplicati
+    # Una sola chiamata API per velocità
+    date_str = "%s %s %s %s %s GMT+0100" % (
+        day_name,
+        month_name,
+        now.format("02"),
+        now.format("2006"),
+        now.format("15:04:05"),
+    )
 
-    # Fai più chiamate per coprire tutta la giornata
-    current_hour = int(now.format("15"))
-    hours_to_check = [now.format("15:04:05")]
+    url = "%s/partenze/%s/%s" % (VIAGGIATRENO_BASE, station_id, date_str)
+    resp = http.get(url, ttl_seconds = 30)
 
-    # Aggiungi chiamata per l'ora corrente + 30 min (per non perdere treni)
-    hour_str = str(current_hour) if current_hour >= 10 else "0" + str(current_hour)
-    hours_to_check.append(hour_str + ":30:00")
-
-    # Aggiungi orari ogni ora fino a mezzanotte
-    for h in range(current_hour + 1, 24):
-        hour_str = str(h) if h >= 10 else "0" + str(h)
-        hours_to_check.append(hour_str + ":00:00")
-        hours_to_check.append(hour_str + ":30:00")
-
-    for hour_str in hours_to_check:
-        date_str = "%s %s %s %s %s GMT+0100" % (
-            day_name,
-            month_name,
-            now.format("02"),
-            now.format("2006"),
-            hour_str,
-        )
-
-        url = "%s/partenze/%s/%s" % (VIAGGIATRENO_BASE, station_id, date_str)
-        resp = http.get(url, ttl_seconds = 30)  # 30 sec per ritardi aggiornati
-
-        if resp.status_code == 200:
-            body = resp.body()
-            if body and body != "":
-                trains = resp.json()
-                if trains:
-                    for t in trains:
-                        # Usa numero treno + orario come chiave per evitare duplicati
-                        key = "%s_%s" % (t.get("numeroTreno", ""), t.get("orarioPartenza", ""))
-                        if key not in seen_trains:
-                            seen_trains[key] = True
-                            all_departures.append(t)
+    departures = []
+    if resp.status_code == 200:
+        body = resp.body()
+        if body and body != "":
+            trains = resp.json()
+            if trains:
+                departures = trains
 
     # Ordina per orario di partenza
-    all_departures = sorted(all_departures, key = lambda x: x.get("orarioPartenza", 0))
+    departures = sorted(departures, key = lambda x: x.get("orarioPartenza", 0))
 
-    if all_departures and len(all_departures) > 0:
-        cache.set(cache_key, json.encode(all_departures), ttl_seconds = 30)  # 30 sec per ritardi aggiornati
+    if departures and len(departures) > 0:
+        cache.set(cache_key, json.encode(departures), ttl_seconds = 30)
 
-    return all_departures if all_departures else []
+    return departures if departures else []
 
 def abbreviate_station(name):
     """Abbrevia il nome della stazione per adattarlo al display."""
@@ -428,49 +412,49 @@ def search_stations(pattern):
     return options[:15]
 
 def get_schema():
-    """Definisce lo schema di configurazione."""
+    """Define configuration schema."""
     return schema.Schema(
         version = "1",
         fields = [
             schema.Typeahead(
                 id = "station_id",
-                name = "Stazione di partenza",
-                desc = "Cerca e seleziona la stazione",
+                name = "Departure Station",
+                desc = "Search and select station",
                 icon = "trainSubway",
                 handler = search_stations,
             ),
             schema.Text(
                 id = "station_name",
-                name = "Nome Stazione",
-                desc = "Nome mostrato nell'header (es: Parabiago)",
+                name = "Station Name",
+                desc = "Name shown in header",
                 icon = "tag",
                 default = "Milano Centrale",
             ),
             schema.Text(
                 id = "destination_filter",
-                name = "Filtro Destinazione",
-                desc = "Filtro destinazioni separate da virgola (es: TREVIGLIO,MILANO)",
+                name = "Destination Filter",
+                desc = "Filter by destinations (comma separated)",
                 icon = "locationArrow",
                 default = "",
             ),
             schema.Text(
                 id = "train_number",
-                name = "Numero Treno",
-                desc = "Mostra solo questo treno specifico (es: 24554)",
+                name = "Train Number",
+                desc = "Show only this specific train",
                 icon = "hashtag",
                 default = "",
             ),
             schema.Text(
                 id = "num_trains",
-                name = "Numero Treni",
-                desc = "Quanti treni mostrare (se >3 cambiano pagina)",
+                name = "Number of Trains",
+                desc = "How many trains to show (max 9)",
                 icon = "list",
                 default = "3",
             ),
             schema.Text(
                 id = "page_duration",
-                name = "Durata Pagina (sec)",
-                desc = "Secondi per pagina (se >3 treni)",
+                name = "Page Duration (sec)",
+                desc = "Seconds per page if >3 trains",
                 icon = "clock",
                 default = "3",
             ),
