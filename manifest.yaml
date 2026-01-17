@@ -1,0 +1,7 @@
+id: trenitalia
+name: Trenitalia Partenze
+summary: Treni in partenza da stazione
+desc: Mostra i prossimi 3 treni in partenza da una stazione Trenitalia con orari di partenza, ritardi in tempo reale e indicazione delle cancellazioni. Ispirato all'app Subway Now per NYC.
+author: Mattia Colombo
+fileName: trenitalia.star
+packageName: trenitalia
