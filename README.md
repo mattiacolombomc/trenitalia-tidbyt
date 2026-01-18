@@ -2,7 +2,7 @@
 
 Estensione Tidbyt per visualizzare i treni in partenza da qualsiasi stazione Trenitalia con orari, ritardi in tempo reale e cancellazioni.
 
-<img src="https://raw.githubusercontent.com/mattiacolombomc/trenitalia-tidbyt/main/preview.gif" width="400" alt="Trenitalia Tidbyt">
+<img src="https://raw.githubusercontent.com/mattiacolombomc/trenitalia-tidbyt/main/preview.gif" width="400" alt="Trenitalia Tidbyt" style="image-rendering: pixelated;">
 
 ## Funzionalità
 
